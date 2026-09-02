@@ -3,6 +3,7 @@ package me.automatedgitdiffnotesgenerator.service;
 import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
 import me.automatedgitdiffnotesgenerator.exception.GitApiException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,7 +27,7 @@ public class GitCompareService {
         this.mapper = mapper;
     }
 
-    public String getCommitDiff(GenerateNoteRequest request) {
+    public String getCommitDiff(GenerateNoteRequest request) throws GitApiException {
         String url = String.format(
                 "https://api.github.com/repos/%s/%s/compare/%s...%s",
                 request.repoOwner(), request.repoName(),
@@ -44,12 +45,20 @@ public class GitCompareService {
         HttpResponse<String> response;
         try {
             response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
-        } catch (IOException | InterruptedException e) {
-            throw new GitApiException("GitHub API error: " + e.getMessage());
+        } catch (IOException e) {
+            throw new GitApiException("Network error connecting to GitHub API", e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new GitApiException("GitHub API request was interrupted", e);
         }
 
         if (response.statusCode() != 200) {
-            throw new GitApiException("GitHub API error: " + response.statusCode() + " - " + response.body());
+            HttpStatus status = HttpStatus.resolve(response.statusCode());
+            HttpStatus finalStatus = status != null ? status : HttpStatus.BAD_GATEWAY;
+            throw new GitApiException(
+                    "GitHub API error (" + response.statusCode() + "): " + response.body(),
+                    finalStatus
+            );
         }
 
         JsonNode root = mapper.readTree(response.body());
