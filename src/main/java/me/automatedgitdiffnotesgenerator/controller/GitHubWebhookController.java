@@ -74,7 +74,7 @@ public class GitHubWebhookController {
             return ResponseEntity.ok("Repository has only one release");
         }
 
-        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, toTag, fromTag);
+        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
         jobProducer.releaseNoteJob(releaseJob);
 
         return ResponseEntity.status(HttpStatus.OK).body("Queued");
