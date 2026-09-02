@@ -5,14 +5,14 @@ CREATE TABLE release_notes
     repo_name     VARCHAR(255)             NOT NULL,
     from_tag      VARCHAR(255)             NOT NULL,
     to_tag        VARCHAR(255)             NOT NULL,
-    status        VARCHAR(20)              NOT NULL DEFAULT 'PENDING', -- PENDING, PROCESSING, COMPLETED, FAILED
+    status        VARCHAR(20)              NOT NULL DEFAULT 'PROCESSING',
     content       TEXT,
     error_message TEXT,
     created_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
     updated_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
 
     CONSTRAINT chk_release_notes_status
-        CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'))
+        CHECK (status IN ('PROCESSING', 'COMPLETED', 'FAILED'))
 );
 
 CREATE INDEX idx_release_notes_repo
