@@ -1,9 +1,10 @@
 package me.automatedgitdiffnotesgenerator.config;
 
 import org.springframework.amqp.core.Queue;
+import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.messaging.converter.JacksonJsonMessageConverter;
 
 @Configuration
 public class RabbitConfig {
@@ -15,7 +16,7 @@ public class RabbitConfig {
     }
 
     @Bean
-    public JacksonJsonMessageConverter messageConverter() {
+    public MessageConverter messageConverter() {
         return new JacksonJsonMessageConverter();
     }
 }
