@@ -22,14 +22,14 @@ public class ReleaseNotesController {
     }
 
     @PostMapping("/generate")
-    public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) throws Exception {
+    public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) {
         var context = compareService.getCommitDiff(request);
 
         return ResponseEntity.ok(generationService.generate(context));
     }
 
     @PostMapping("/generate-async")
-    public ResponseEntity<?> generateNotesSaveAsync(@RequestBody @Valid GenerateNoteRequest request) throws Exception {
+    public ResponseEntity<?> generateNotesSaveAsync(@RequestBody @Valid GenerateNoteRequest request) {
         var releaseJob = new ReleaseNoteJob(
                 request.repoOwner(),
                 request.repoName(),
