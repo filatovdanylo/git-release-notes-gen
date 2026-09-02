@@ -40,44 +40,57 @@ public class GitHubWebhookController {
     }
 
     @PostMapping("/github")
-    public ResponseEntity<String> createGitHubWebhook(
+    public ResponseEntity<?> createGitHubWebhook(
             @RequestHeader("X-GitHub-Event") String event,
-            @RequestHeader(value = "X-GitHub-Signature256", required = false) String signature,
+            @RequestHeader(value = "X-Hub-Signature-256", required = false) String signature,
             @RequestBody String rawBody
-    ) throws IOException {
+    ) {
         if (signature == null || !signature.startsWith("sha256=")) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid signature");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid signature format");
         }
 
         if (!isValidSignature(rawBody, signature)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid signature");
         }
 
-        if (!"release".equals(event)) {
+        if (!"release".equalsIgnoreCase(event)) {
             return ResponseEntity.ok("Ignored event type " + event);
         }
 
-        JsonNode root = objectMapper.readTree(rawBody);
-        String action = root.get("action").asString();
+        try {
+            JsonNode root = objectMapper.readTree(rawBody);
+            String action = root.path("action").asString();
 
-        if (!"published".equals(action)) {
-            return ResponseEntity.ok("Ignored action " + action);
+            if (!"published".equals(action)) {
+                return ResponseEntity.ok("Ignored action " + action);
+            }
+
+            String repoOwner = root.path("repository").path("owner").path("login").asString();
+            String repoName = root.path("repository").path("name").asString();
+            String toTag = root.path("release").path("tag_name").asString();
+
+            if (repoOwner.isEmpty() || repoName.isEmpty() || toTag.isEmpty()) {
+                return ResponseEntity.unprocessableContent().body("Required webhook payload fields are missing");
+            }
+
+            String fromTag;
+            try {
+                fromTag = tagService.getPreviousTag(repoOwner + "/" + repoName);
+            } catch (IOException e) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body("Could not reach GitHub to resolve previous tag");
+            }
+            if (fromTag == null) {
+                return ResponseEntity.ok("Repository has only one release");
+            }
+
+            var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
+            jobProducer.releaseNoteJob(releaseJob);
+
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body("Queued");
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid JSON payload");
         }
-
-        String repoOwner = root.get("repository").get("owner").get("login").asString();
-        String repoName = root.get("repository").get("name").asString();
-        String toTag = root.get("release").get("tag_name").asString();
-
-        String fromTag = tagService.getPreviousTag(repoOwner + "/" + repoName);
-
-        if (fromTag == null) {
-            return ResponseEntity.ok("Repository has only one release");
-        }
-
-        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
-        jobProducer.releaseNoteJob(releaseJob);
-
-        return ResponseEntity.status(HttpStatus.OK).body("Queued");
     }
 
     private boolean isValidSignature(String payload, String signatureHeader) {
