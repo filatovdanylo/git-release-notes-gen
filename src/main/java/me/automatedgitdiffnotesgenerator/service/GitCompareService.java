@@ -1,11 +1,13 @@
 package me.automatedgitdiffnotesgenerator.service;
 
 import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
+import me.automatedgitdiffnotesgenerator.exception.GitApiException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -24,7 +26,7 @@ public class GitCompareService {
         this.mapper = mapper;
     }
 
-    public String getCommitDiff(GenerateNoteRequest request) throws Exception {
+    public String getCommitDiff(GenerateNoteRequest request) {
         String url = String.format(
                 "https://api.github.com/repos/%s/%s/compare/%s...%s",
                 request.repoOwner(), request.repoName(),
@@ -39,10 +41,15 @@ public class GitCompareService {
                 .GET()
                 .build();
 
-        HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response;
+        try {
+            response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException e) {
+            throw new GitApiException("GitHub API error: " + e.getMessage());
+        }
 
         if (response.statusCode() != 200) {
-            throw new RuntimeException("GitHub API error: " + response.statusCode() + " - " + response.body());
+            throw new GitApiException("GitHub API error: " + response.statusCode() + " - " + response.body());
         }
 
         JsonNode root = mapper.readTree(response.body());
