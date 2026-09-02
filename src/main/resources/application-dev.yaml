@@ -1,0 +1,6 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/git-diff-notes-generator-database
+    username: postgres
+    password: ${DATABASE_DEV_PASSWORD}
+    driver-class-name: org.postgresql.Driver
