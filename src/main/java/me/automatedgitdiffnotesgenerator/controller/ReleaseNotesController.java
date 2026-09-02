@@ -1,5 +1,6 @@
 package me.automatedgitdiffnotesgenerator.controller;
 
+import jakarta.validation.Valid;
 import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitCompareService;
@@ -21,14 +22,14 @@ public class ReleaseNotesController {
     }
 
     @PostMapping("/generate")
-    public String generateNotes(@RequestBody GenerateNoteRequest request) throws Exception {
+    public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) throws Exception {
         var context = compareService.getCommitDiff(request);
 
-        return generationService.generate(context);
+        return ResponseEntity.ok(generationService.generate(context));
     }
 
     @PostMapping("/generate-async")
-    public ResponseEntity<?> generateNotesSaveAsync(@RequestBody GenerateNoteRequest request) throws Exception {
+    public ResponseEntity<?> generateNotesSaveAsync(@RequestBody @Valid GenerateNoteRequest request) throws Exception {
         var releaseJob = new ReleaseNoteJob(
                 request.repoOwner(),
                 request.repoName(),
@@ -37,7 +38,7 @@ public class ReleaseNotesController {
         );
         jobProducer.releaseNoteJob(releaseJob);
 
-        return ResponseEntity.ok("Queued");
+        return ResponseEntity.accepted().body("Queued for generation");
     }
 
 }
