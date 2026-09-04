@@ -4,3 +4,11 @@ spring:
     username: postgres
     password: ${DATABASE_DEV_PASSWORD}
     driver-class-name: org.postgresql.Driver
+  ai:
+    ollama:
+      chat:
+        model: qwen3:8b
+        temperature: 0.3
+        think: false
+  jpa:
+    show-sql: true
