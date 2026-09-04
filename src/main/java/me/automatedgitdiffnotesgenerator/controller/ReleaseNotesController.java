@@ -5,7 +5,9 @@ import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitCompareService;
 import me.automatedgitdiffnotesgenerator.service.NoteGenerationService;
-import me.automatedgitdiffnotesgenerator.service.ReleaseNoteJobProducer;
+import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
+import me.automatedgitdiffnotesgenerator.service.ReleaseNotesService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -15,12 +17,20 @@ public class ReleaseNotesController {
     private final GitCompareService compareService;
     private final NoteGenerationService generationService;
     private final ReleaseNoteJobProducer jobProducer;
-    public ReleaseNotesController(GitCompareService compareService, NoteGenerationService generationService, ReleaseNoteJobProducer jobProducer) {
+    private final ReleaseNotesService notesService;
+    public ReleaseNotesController(
+            GitCompareService compareService,
+            NoteGenerationService generationService,
+            ReleaseNoteJobProducer jobProducer,
+            ReleaseNotesService notesService
+    ) {
         this.compareService = compareService;
         this.generationService = generationService;
         this.jobProducer = jobProducer;
+        this.notesService = notesService;
     }
 
+    @ResponseStatus(HttpStatus.OK)
     @PostMapping("/generate")
     public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) {
         var context = compareService.getCommitDiff(request);
@@ -28,6 +38,7 @@ public class ReleaseNotesController {
         return ResponseEntity.ok(generationService.generate(context));
     }
 
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/generate-async")
     public ResponseEntity<?> generateNotesSaveAsync(@RequestBody @Valid GenerateNoteRequest request) {
         var releaseJob = new ReleaseNoteJob(
@@ -39,6 +50,13 @@ public class ReleaseNotesController {
         jobProducer.releaseNoteJob(releaseJob);
 
         return ResponseEntity.accepted().body("Queued for generation");
+    }
+
+    @GetMapping("/{repo}")
+    public ResponseEntity<?> getNotesByRepo(@PathVariable String repo) {
+        var notes = notesService.getNotesByRepoName(repo);
+
+        return ResponseEntity.ok(notes);
     }
 
 }
