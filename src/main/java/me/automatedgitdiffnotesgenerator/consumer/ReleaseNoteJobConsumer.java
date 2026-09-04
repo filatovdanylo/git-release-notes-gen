@@ -1,5 +1,6 @@
 package me.automatedgitdiffnotesgenerator.consumer;
 
+import lombok.extern.slf4j.Slf4j;
 import me.automatedgitdiffnotesgenerator.config.RabbitConfig;
 import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
 import me.automatedgitdiffnotesgenerator.entity.ReleaseNote;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.OffsetDateTime;
 
+@Slf4j
 @Component
 public class ReleaseNoteJobConsumer {
     private final GitCompareService compareService;
@@ -25,7 +27,20 @@ public class ReleaseNoteJobConsumer {
     }
 
     @RabbitListener(queues = RabbitConfig.QUEUE_NAME)
-    public void handleJob(ReleaseNoteJob job) throws Exception {
+    public void handleJob(ReleaseNoteJob job) {
+        boolean alreadyExists = noteRepository.existsByRepoOwnerAndRepoNameAndFromTagAndToTag(
+                job.repoOwner(),
+                job.repoName(),
+                job.fromTag(),
+                job.toTag()
+        );
+
+        if (alreadyExists) {
+            log.info("Release notes already generated for {}/{} {}...{}, skipping request",
+                    job.repoOwner(), job.repoName(), job.fromTag(), job.toTag());
+            return;
+        }
+
         ReleaseNote note = new ReleaseNote();
         note.setRepoName(job.repoName());
         note.setRepoOwner(job.repoOwner());
