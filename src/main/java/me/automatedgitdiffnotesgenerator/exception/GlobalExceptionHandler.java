@@ -1,5 +1,6 @@
 package me.automatedgitdiffnotesgenerator.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -11,6 +12,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -22,6 +24,8 @@ public class GlobalExceptionHandler {
         problemDetail.setTitle("GitHub API Error");
         problemDetail.setType(URI.create("https://api.github.com/errors/git-api-error"));
         problemDetail.setProperty("timestamp", Instant.now());
+
+        log.error("GitHub API error occurred: {}", ex.getMessage(), ex);
 
         return problemDetail;
     }
@@ -42,6 +46,8 @@ public class GlobalExceptionHandler {
         problemDetail.setProperty("errors", fieldErrors);
         problemDetail.setProperty("timestamp", Instant.now());
 
+        log.warn("Validation failed for request parameters: {}", fieldErrors);
+
         return problemDetail;
     }
 
@@ -53,6 +59,8 @@ public class GlobalExceptionHandler {
         );
         problemDetail.setTitle("Internal Server Error");
         problemDetail.setProperty("timestamp", Instant.now());
+
+        log.error("An unexpected system error occurred.", e);
 
         return problemDetail;
     }
