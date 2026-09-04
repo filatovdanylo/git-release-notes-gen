@@ -1,5 +1,7 @@
 package me.automatedgitdiffnotesgenerator.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.extern.slf4j.Slf4j;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
@@ -41,6 +43,7 @@ public class GitHubWebhookController {
         this.jobProducer = jobProducer;
     }
 
+    @Operation(security = @SecurityRequirement(name = "githubWebhookSignature"))
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/github")
     public ResponseEntity<?> createGitHubWebhook(
