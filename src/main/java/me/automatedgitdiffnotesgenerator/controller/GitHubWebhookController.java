@@ -3,6 +3,7 @@ package me.automatedgitdiffnotesgenerator.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.extern.slf4j.Slf4j;
+import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
 import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
@@ -91,12 +92,17 @@ public class GitHubWebhookController {
 
             String fromTag;
             try {
-                fromTag = tagService.getPreviousTag(repoOwner + "/" + repoName);
+                fromTag = tagService.getPreviousTag(repository, toTag);
             } catch (IOException e) {
                 log.error("Failed to fetch previous tag from GitHub API for repository: {}", repository, e);
                 return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                         .body("Could not reach GitHub to resolve previous tag");
+            } catch (TagNotFoundException e) {
+                log.warn("Tag not found while resolving previous tag: {}", e.getMessage());
+                return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body("Requested tag not found in repository");
             }
+
             if (fromTag == null) {
                 log.info("Webhook workflow skipped: Repository {} has only one release (no previous tags found)", repository);
                 return ResponseEntity.ok("Repository has only one release");
