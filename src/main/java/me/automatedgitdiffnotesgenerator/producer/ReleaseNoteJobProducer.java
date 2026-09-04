@@ -1,4 +1,4 @@
-package me.automatedgitdiffnotesgenerator.service;
+package me.automatedgitdiffnotesgenerator.producer;
 
 import me.automatedgitdiffnotesgenerator.config.RabbitConfig;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;

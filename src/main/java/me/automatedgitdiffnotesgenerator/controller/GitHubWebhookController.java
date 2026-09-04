@@ -3,7 +3,7 @@ package me.automatedgitdiffnotesgenerator.controller;
 import lombok.extern.slf4j.Slf4j;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
-import me.automatedgitdiffnotesgenerator.service.ReleaseNoteJobProducer;
+import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +41,7 @@ public class GitHubWebhookController {
         this.jobProducer = jobProducer;
     }
 
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/github")
     public ResponseEntity<?> createGitHubWebhook(
             @RequestHeader("X-GitHub-Event") String event,
