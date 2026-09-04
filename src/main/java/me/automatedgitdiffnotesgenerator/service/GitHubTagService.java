@@ -1,5 +1,6 @@
 package me.automatedgitdiffnotesgenerator.service;
 
+import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
 import org.kohsuke.github.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -13,17 +14,28 @@ public class GitHubTagService {
     @Value("${github.api.token}")
     private String githubToken;
 
-    public String getPreviousTag(String repoFullName) throws IOException {
+    public String getPreviousTag(String repoFullName, String toTag) throws IOException {
         GitHub github = new GitHubBuilder().withOAuthToken(githubToken).build();
         GHRepository repository = github.getRepository(repoFullName);
 
-        PagedIterable<GHTag> tagsIterable = repository.listTags();
-        List<GHTag> tags = tagsIterable.toList();
+        List<GHTag> tags = repository.listTags().toList();
 
-        if (tags.size() < 2) {
+        int index = -1;
+        for (int i = 0; i < tags.size(); i++) {
+            if (tags.get(i).getName().equals(toTag)) {
+                index = i;
+                break;
+            }
+        }
+
+        if (index == -1) {
+            throw new TagNotFoundException("Tag '" + toTag + "' not found in repository " + repoFullName);
+        }
+
+        if (index + 1 >= tags.size()) {
             return null;
         }
 
-        return tags.get(1).getName();
+        return tags.get(index + 1).getName();
     }
 }
