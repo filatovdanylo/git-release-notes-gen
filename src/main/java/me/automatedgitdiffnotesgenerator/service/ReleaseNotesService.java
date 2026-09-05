@@ -13,8 +13,8 @@ public class ReleaseNotesService {
         this.repository = repository;
     }
 
-    public List<NoteResponse> getNotesByRepoName(String fullRepoName) {
-        return repository.findByRepoName(fullRepoName).stream()
+    public List<NoteResponse> getNotesByRepoName(String owner, String repoName) {
+        return repository.findByRepoOwnerAndRepoName(owner, repoName).stream()
                 .map(r -> new NoteResponse(
                         r.getRepoOwner(),
                         r.getRepoName(),

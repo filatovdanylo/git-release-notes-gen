@@ -52,9 +52,9 @@ public class ReleaseNotesController {
         return ResponseEntity.accepted().body("Queued for generation");
     }
 
-    @GetMapping("/{repo}")
-    public ResponseEntity<?> getNotesByRepo(@PathVariable String repo) {
-        var notes = notesService.getNotesByRepoName(repo);
+    @GetMapping("/{owner}/{repo}")
+    public ResponseEntity<?> getNotesByRepo(@PathVariable String owner, @PathVariable String repo) {
+        var notes = notesService.getNotesByRepoName(owner, repo);
 
         return ResponseEntity.ok(notes);
     }

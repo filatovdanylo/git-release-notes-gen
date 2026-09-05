@@ -6,7 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import java.util.List;
 
 public interface ReleaseNoteRepository extends JpaRepository<ReleaseNote, Long> {
-    List<ReleaseNote> findByRepoName(String repoName);
+    List<ReleaseNote> findByRepoOwnerAndRepoName(String repoOwner, String repoName);
     boolean existsByRepoOwnerAndRepoNameAndFromTagAndToTag(
             String repoOwner, String repoName, String fromTag, String toTag);
 }
