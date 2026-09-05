@@ -1,6 +1,8 @@
 package me.automatedgitdiffnotesgenerator.service;
 
+import jakarta.transaction.Transactional;
 import me.automatedgitdiffnotesgenerator.dto.NoteResponse;
+import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.repository.ReleaseNoteRepository;
 import org.springframework.stereotype.Service;
 
@@ -22,5 +24,15 @@ public class ReleaseNotesService {
                         r.getToTag(),
                         r.getContent()
                 )).toList();
+    }
+
+    @Transactional
+    public boolean tryClaim(ReleaseNoteJob job) {
+        return repository.tryClaim(
+                job.repoOwner(),
+                job.repoName(),
+                job.fromTag(),
+                job.toTag()
+        ) == 1;
     }
 }

@@ -8,6 +8,7 @@ import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.repository.ReleaseNoteRepository;
 import me.automatedgitdiffnotesgenerator.service.GitCompareService;
 import me.automatedgitdiffnotesgenerator.service.NoteGenerationService;
+import me.automatedgitdiffnotesgenerator.service.ReleaseNotesService;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 
@@ -19,37 +20,47 @@ public class ReleaseNoteJobConsumer {
     private final GitCompareService compareService;
     private final NoteGenerationService generationService;
     private final ReleaseNoteRepository noteRepository;
+    private final ReleaseNotesService notesService;
 
-    public ReleaseNoteJobConsumer(GitCompareService compareService, NoteGenerationService generationService, ReleaseNoteRepository noteRepository) {
+    public ReleaseNoteJobConsumer(
+            GitCompareService compareService,
+            NoteGenerationService generationService,
+            ReleaseNoteRepository noteRepository,
+            ReleaseNotesService notesService
+    ) {
         this.compareService = compareService;
         this.generationService = generationService;
         this.noteRepository = noteRepository;
+        this.notesService = notesService;
     }
 
     @RabbitListener(queues = RabbitConfig.QUEUE_NAME)
     public void handleJob(ReleaseNoteJob job) {
-        boolean alreadyExists = noteRepository.existsByRepoOwnerAndRepoNameAndFromTagAndToTag(
-                job.repoOwner(),
-                job.repoName(),
-                job.fromTag(),
-                job.toTag()
-        );
+        log.info("Received a ReleaseNoteJob from the queue: {}", job);
 
-        if (alreadyExists) {
-            log.info("Release notes already generated for {}/{} {}...{}, skipping request",
-                    job.repoOwner(), job.repoName(), job.fromTag(), job.toTag());
+        if (!notesService.tryClaim(job)) {
+            log.info("Job already claimed: {}/{} {}...{}",
+                    job.repoOwner(),
+                    job.repoName(),
+                    job.fromTag(),
+                    job.toTag());
             return;
         }
 
-        ReleaseNote note = new ReleaseNote();
-        note.setRepoName(job.repoName());
-        note.setRepoOwner(job.repoOwner());
-        note.setFromTag(job.fromTag());
-        note.setToTag(job.toTag());
-        note.setStatus(ReleaseNote.Status.PROCESSING);
-        note.setCreatedAt(OffsetDateTime.now());
-        note.setUpdatedAt(OffsetDateTime.now());
-        noteRepository.save(note);
+        ReleaseNote note = noteRepository.findByRepoOwnerAndRepoNameAndFromTagAndToTag(
+                job.repoOwner(), job.repoName(), job.fromTag(), job.toTag()
+        ).orElse(null);
+
+        if (note == null) {
+            log.error(
+                    "CRITICAL: job was successfully claimed, but ReleaseNote could not be loaded. Job: {}/{} {}...{}",
+                    job.repoOwner(),
+                    job.repoName(),
+                    job.fromTag(),
+                    job.toTag()
+            );
+            return;
+        }
 
         try {
             GenerateNoteRequest noteRequest = new GenerateNoteRequest(
