@@ -75,8 +75,10 @@ public class ReleaseNoteJobConsumer {
             note.setContent(generatedNotes);
             note.setStatus(ReleaseNote.Status.COMPLETED);
         } catch (Exception e) {
+            log.error("Failed to generate release notes for {}/{} {}...{}",
+                    job.repoOwner(), job.repoName(), job.fromTag(), job.toTag(), e);
             note.setStatus(ReleaseNote.Status.FAILED);
-            note.setErrorMessage(e.getMessage());
+            note.setErrorMessage("Generation failed. See server logs for details");
         } finally {
             note.setUpdatedAt(OffsetDateTime.now());
             noteRepository.save(note);

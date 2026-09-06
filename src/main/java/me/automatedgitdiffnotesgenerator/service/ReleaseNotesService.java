@@ -22,7 +22,9 @@ public class ReleaseNotesService {
                         r.getRepoName(),
                         r.getFromTag(),
                         r.getToTag(),
-                        r.getContent()
+                        r.getStatus(),
+                        r.getContent(),
+                        r.getCreatedAt()
                 )).toList();
     }
 
