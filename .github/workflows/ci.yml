@@ -1,0 +1,37 @@
+name: CI
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: 25
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Run tests
+        run: ./gradlew test
+        env:
+          GITHUB_PAT_TOKEN: test_token
+          WEBHOOK_SECRET: webhook_test
+          DATABASE_DEV_PASSWORD: password_test
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/reports/tests/test
+
+
