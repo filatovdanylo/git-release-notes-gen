@@ -21,3 +21,5 @@ app:
     secret: ${JWT_SECRET}
     issuer: git-diff-notes-generator
     access-token-ttl: 1h
+  release-notes:
+    claim-stale-after: 15m
