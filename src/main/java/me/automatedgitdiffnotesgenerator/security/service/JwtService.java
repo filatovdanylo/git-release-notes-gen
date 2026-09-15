@@ -1,6 +1,7 @@
 package me.automatedgitdiffnotesgenerator.security.service;
 
 
+import me.automatedgitdiffnotesgenerator.exception.ForbiddenException;
 import me.automatedgitdiffnotesgenerator.security.config.JwtProperties;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -29,7 +30,7 @@ public class JwtService {
                 .map(GrantedAuthority::getAuthority)
                 .findFirst()
                 .map(authority -> authority.replaceFirst("^ROLE_", ""))
-                .orElseThrow(() -> new IllegalStateException(
+                .orElseThrow(() -> new ForbiddenException(
                         "User has no authorities; cannot issue a token without a role"));
 
         JwtClaimsSet claims = JwtClaimsSet.builder()
