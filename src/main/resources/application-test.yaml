@@ -15,5 +15,5 @@ spring:
 app:
   jwt:
     issuer: test-issuer
-    secret: SGVsbG9UaGlzSXNBVGVzdFNlY3JldEtleUZvckpXVA==
+    secret: MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=
     access-token-ttl: 15m

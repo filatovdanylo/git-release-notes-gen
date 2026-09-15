@@ -29,7 +29,6 @@ jobs:
           GITHUB_PAT_TOKEN: test_token
           WEBHOOK_SECRET: webhook_test
           DATABASE_DEV_PASSWORD: password_test
-          JWT_SECRET: SGVsbG9UaGlzSXNBVGVzdFNlY3JldEtleUZvckpXVA==
 
       - name: Publish test results
         if: always()
