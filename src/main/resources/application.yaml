@@ -16,3 +16,8 @@ github:
     token: ${GITHUB_PAT_TOKEN}
   webhook:
     secret: ${WEBHOOK_SECRET}
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: git-diff-notes-generator
+    access-token-ttl: 1h

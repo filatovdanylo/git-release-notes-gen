@@ -12,3 +12,8 @@ spring:
 
   flyway:
     enabled: false
+app:
+  jwt:
+    issuer: test-issuer
+    secret: SGVsbG9UaGlzSXNBVGVzdFNlY3JldEtleUZvckpXVA==
+    access-token-ttl: 15m
