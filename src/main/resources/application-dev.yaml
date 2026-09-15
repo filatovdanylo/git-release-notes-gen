@@ -12,3 +12,8 @@ spring:
         think: false
   jpa:
     show-sql: true
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: git-diff-notes-generator
+    access-token-ttl: 1h

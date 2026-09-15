@@ -28,12 +28,18 @@ public class OpenApiConfig {
                         )
                 )
                 .components(new Components()
-                .addSecuritySchemes("githubWebhookSignature",
-                        new SecurityScheme()
-                                .type(SecurityScheme.Type.APIKEY)
-                                .in(SecurityScheme.In.HEADER)
-                                .name("X-Hub-Signature-256")
-                                .description("HMAC-SHA256 signature GitHub sends to verify webhook authenticity"))
-                );
+                        .addSecuritySchemes("githubWebhookSignature",
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.APIKEY)
+                                        .in(SecurityScheme.In.HEADER)
+                                        .name("X-Hub-Signature-256")
+                                        .description("HMAC-SHA256 signature GitHub sends to verify webhook authenticity"))
+                        .addSecuritySchemes("bearerAuth",
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .name("JWT authentication")
+                                        .scheme("bearer")
+                                        .bearerFormat("JWT")
+                ));
     }
 }
