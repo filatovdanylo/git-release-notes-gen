@@ -1,5 +1,7 @@
 package me.automatedgitdiffnotesgenerator.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import me.automatedgitdiffnotesgenerator.dto.GenerateNoteRequest;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
@@ -32,6 +34,10 @@ public class ReleaseNotesController {
 
     @ResponseStatus(HttpStatus.OK)
     @PostMapping("/generate")
+    @Operation(
+            summary = "Generate release notes manually in synchronous mode",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
     public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) {
         var context = compareService.getCommitDiff(request);
 
@@ -40,6 +46,10 @@ public class ReleaseNotesController {
 
     @ResponseStatus(HttpStatus.ACCEPTED)
     @PostMapping("/generate-async")
+    @Operation(
+            summary = "Generate release notes manually in asynchronous mode",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
     public ResponseEntity<?> generateNotesSaveAsync(@RequestBody @Valid GenerateNoteRequest request) {
         var releaseJob = new ReleaseNoteJob(
                 request.repoOwner(),
@@ -53,6 +63,10 @@ public class ReleaseNotesController {
     }
 
     @GetMapping("/{owner}/{repo}")
+    @Operation(
+            summary = "Get all release notes for given {owner} and {repo}",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
     public ResponseEntity<?> getNotesByRepo(@PathVariable String owner, @PathVariable String repo) {
         var notes = notesService.getNotesByRepoName(owner, repo);
 
