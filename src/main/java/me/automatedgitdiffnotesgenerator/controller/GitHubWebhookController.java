@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -69,53 +70,62 @@ public class GitHubWebhookController {
             return ResponseEntity.ok("Ignored event type " + event);
         }
 
+
+        JsonNode root;
         try {
-            JsonNode root = objectMapper.readTree(rawBody);
-            String action = root.path("action").asString();
-
-            if (!"published".equals(action)) {
-                log.info("Webhook ignored: Release action '{}' is not 'published'", action);
-                return ResponseEntity.ok("Ignored action " + action);
-            }
-
-            String repoOwner = root.path("repository").path("owner").path("login").asString();
-            String repoName = root.path("repository").path("name").asString();
-            String toTag = root.path("release").path("tag_name").asString();
-
-            if (repoOwner.isEmpty() || repoName.isEmpty() || toTag.isEmpty()) {
-                log.warn("Webhook validation failed: Missing required fields (owner, name, or tag_name)");
-                return ResponseEntity.unprocessableContent().body("Required webhook payload fields are missing");
-            }
-
-            String repository = repoOwner + "/" + repoName;
-            log.info("Processing published release for repository: {}, tag: {}", repository, toTag);
-
-            String fromTag;
-            try {
-                fromTag = tagService.getPreviousTag(repository, toTag);
-            } catch (IOException e) {
-                log.error("Failed to fetch previous tag from GitHub API for repository: {}", repository, e);
-                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                        .body("Could not reach GitHub to resolve previous tag");
-            } catch (TagNotFoundException e) {
-                log.warn("Tag not found while resolving previous tag: {}", e.getMessage());
-                return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                        .body("Requested tag not found in repository");
-            }
-
-            if (fromTag == null) {
-                log.info("Webhook workflow skipped: Repository {} has only one release (no previous tags found)", repository);
-                return ResponseEntity.ok("Repository has only one release");
-            }
-
-            var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
-            jobProducer.releaseNoteJob(releaseJob);
-
-            log.info("Successfully queued new release job for repository: {}, tags: {} -> {}", repository, fromTag, toTag);
-            return ResponseEntity.status(HttpStatus.ACCEPTED).body("Queued");
-        } catch (Exception e) {
+            root = objectMapper.readTree(rawBody);
+        } catch (JacksonException e) {
+            log.error("Webhook payload parsing failed: Invalid JSON structure", e);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid JSON payload");
         }
+
+
+        String action = root.path("action").asString();
+        if (!"published".equals(action)) {
+            log.info("Webhook ignored: Release action '{}' is not 'published'", action);
+            return ResponseEntity.ok("Ignored action " + action);
+        }
+
+
+        // Mandatory fields
+        String repoOwner = root.path("repository").path("owner").path("login").asString();
+        String repoName = root.path("repository").path("name").asString();
+        String toTag = root.path("release").path("tag_name").asString();
+
+        if (repoOwner.isEmpty() || repoName.isEmpty() || toTag.isEmpty()) {
+            log.warn("Webhook validation failed: Missing required fields (owner, name, or tag_name)");
+            return ResponseEntity.unprocessableContent().body("Required webhook payload fields are missing");
+        }
+
+        String repository = repoOwner + "/" + repoName;
+        log.info("Processing published release for repository: {}, tag: {}", repository, toTag);
+
+
+        // Fetch fromTag
+        String fromTag;
+        try {
+            fromTag = tagService.getPreviousTag(repository, toTag);
+        } catch (IOException e) {
+            log.error("Failed to fetch previous tag from GitHub API for repository: {}", repository, e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body("Could not reach GitHub to resolve previous tag");
+        } catch (TagNotFoundException e) {
+            log.warn("Tag not found while resolving previous tag: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
+                    .body("Requested tag not found in repository");
+        }
+
+        if (fromTag == null) {
+            log.info("Webhook workflow skipped: Repository {} has only one release (no previous tags found)", repository);
+            return ResponseEntity.ok("Repository has only one release");
+        }
+
+        // Queue job
+        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
+        jobProducer.releaseNoteJob(releaseJob);
+
+        log.info("Successfully queued new release job for repository: {}, tags: {} -> {}", repository, fromTag, toTag);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body("Queued");
     }
 
     private boolean isValidSignature(String payload, String signatureHeader) {
