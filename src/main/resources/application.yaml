@@ -7,6 +7,15 @@ spring:
     properties:
       hibernate:
         format_sql: true
+  rabbitmq:
+    listener:
+      simple:
+        retry:
+          enabled: true
+          max-retries: 3
+          initial-interval: 1000ms
+          multiplier: 2.0
+          max-interval: 10000ms
 
   flyway:
     enabled: true

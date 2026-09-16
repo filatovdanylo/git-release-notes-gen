@@ -3,7 +3,6 @@ package me.automatedgitdiffnotesgenerator.controller;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.extern.slf4j.Slf4j;
-import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
 import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
@@ -17,7 +16,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import java.security.MessageDigest;
@@ -29,7 +27,6 @@ import java.util.HexFormat;
 public class GitHubWebhookController {
     private static final String HMAC_SHA256 = "HmacSHA256";
     private final ObjectMapper objectMapper;
-    private final GitHubTagService tagService;
     private final ReleaseNoteJobProducer jobProducer;
 
     @Value("${github.webhook.secret}")
@@ -37,11 +34,9 @@ public class GitHubWebhookController {
 
     public GitHubWebhookController(
             ObjectMapper objectMapper,
-            GitHubTagService tagService,
             ReleaseNoteJobProducer jobProducer
     ) {
         this.objectMapper = objectMapper;
-        this.tagService = tagService;
         this.jobProducer = jobProducer;
     }
 
@@ -98,33 +93,12 @@ public class GitHubWebhookController {
         }
 
         String repository = repoOwner + "/" + repoName;
-        log.info("Processing published release for repository: {}, tag: {}", repository, toTag);
-
-
-        // Fetch fromTag
-        String fromTag;
-        try {
-            fromTag = tagService.getPreviousTag(repository, toTag);
-        } catch (IOException e) {
-            log.error("Failed to fetch previous tag from GitHub API for repository: {}", repository, e);
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body("Could not reach GitHub to resolve previous tag");
-        } catch (TagNotFoundException e) {
-            log.warn("Tag not found while resolving previous tag: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
-                    .body("Requested tag not found in repository");
-        }
-
-        if (fromTag == null) {
-            log.info("Webhook workflow skipped: Repository {} has only one release (no previous tags found)", repository);
-            return ResponseEntity.ok("Repository has only one release");
-        }
 
         // Queue job
-        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, fromTag, toTag);
+        var releaseJob = new ReleaseNoteJob(repoOwner, repoName, null, toTag);
         jobProducer.releaseNoteJob(releaseJob);
 
-        log.info("Successfully queued new release job for repository: {}, tags: {} -> {}", repository, fromTag, toTag);
+        log.info("Successfully queued new release job for repository: {}, target tag is: {}", repository, toTag);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body("Queued");
     }
 

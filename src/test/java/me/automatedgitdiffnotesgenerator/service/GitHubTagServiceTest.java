@@ -5,10 +5,7 @@ import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.kohsuke.github.GHRepository;
-import org.kohsuke.github.GHTag;
-import org.kohsuke.github.GitHub;
-import org.kohsuke.github.PagedIterable;
+import org.kohsuke.github.*;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -35,26 +32,39 @@ public class GitHubTagServiceTest {
     private GHRepository mockRepository;
 
     @Mock
-    private PagedIterable<GHTag> mockPagedIterable;
+    private PagedIterable<GHRelease> mockPagedIterable;
 
     @BeforeEach
     void setUp() throws IOException {
         when(clientFactory.create()).thenReturn(mockGitHub);
         lenient().when(mockGitHub.getRepository(anyString())).thenReturn(mockRepository);
-        lenient().when(mockRepository.listTags()).thenReturn(mockPagedIterable);
+        lenient().when(mockRepository.listReleases()).thenReturn(mockPagedIterable);
+    }
+
+    private GHRelease release(String tagName, boolean draft) {
+        GHRelease release = mock(GHRelease.class);
+        lenient().when(release.getTagName()).thenReturn(tagName);
+        lenient().when(release.isDraft()).thenReturn(draft);
+        return release;
+    }
+
+    private void givenReleases(GHRelease... releases) {
+        PagedIterator<GHRelease> mockIterator = mock(PagedIterator.class);
+
+        var listIterator = List.of(releases).iterator();
+
+        when(mockIterator.hasNext()).thenAnswer(inv -> listIterator.hasNext());
+        when(mockIterator.next()).thenAnswer(inv -> listIterator.next());
+
+        when(mockPagedIterable.iterator()).thenReturn(mockIterator);
     }
 
     @Test
-    void previousTagExistsForGivenRepository_returnsPreviousTag() throws IOException {
+    void previousReleaseExistsForGivenRepository_returnsPreviousTag() throws IOException {
         String fullRepoName = "user/test-repo";
         String toTag = "2.0";
-        GHTag tag2 = mock(GHTag.class);
-        GHTag tag1 = mock(GHTag.class);
 
-        when(tag2.getName()).thenReturn("2.0");
-        when(tag1.getName()).thenReturn("1.0");
-
-        when(mockPagedIterable.toList()).thenReturn(List.of(tag2, tag1));
+        givenReleases(release("2.0", false), release("1.0", false));
 
         String previousTag = gitHubTagService.getPreviousTag(fullRepoName, toTag);
 
@@ -62,44 +72,47 @@ public class GitHubTagServiceTest {
     }
 
     @Test
+    void previousReleaseSkipsDraftInBetween_returnsNextNonDraftTag() throws IOException {
+        String fullRepoName = "user/test-repo";
+        String toTag = "3.0";
+
+        givenReleases(
+                release("3.0", false),
+                release("2.5-draft", true),
+                release("2.0", false)
+        );
+
+        String previousTag = gitHubTagService.getPreviousTag(fullRepoName, toTag);
+
+        assertEquals("2.0", previousTag);
+    }
+
+    @Test
     void targetTagDoesNotExistForGivenRepository_throwsTagNotFoundException() throws IOException {
         String fullRepoName = "user/test-repo";
         String toTag = "2.0";
-        GHTag otherTag = mock(GHTag.class);
 
-        when(otherTag.getName()).thenReturn("1.0");
-
-        when(mockPagedIterable.toList()).thenReturn(List.of(otherTag));
+        givenReleases(release("1.0", false));
 
         assertThrows(TagNotFoundException.class, () -> gitHubTagService.getPreviousTag(fullRepoName, toTag));
     }
 
     @Test
-    void repositoryHasOnlyOneTag_returnsNull() throws IOException {
+    void repositoryHasOnlyOneRelease_returnsNull() throws IOException {
         String fullRepoName = "user/test-repo";
         String toTag = "2.0";
-        GHTag theOnlyTag = mock(GHTag.class);
 
-        when(theOnlyTag.getName()).thenReturn("2.0");
-
-        when(mockPagedIterable.toList()).thenReturn(List.of(theOnlyTag));
+        givenReleases(release("2.0", false));
 
         assertNull(gitHubTagService.getPreviousTag(fullRepoName, toTag));
     }
 
     @Test
-    void targetTagIsTheFirstTagInRepository_returnsNull() throws IOException {
+    void targetTagIsTheOldestReleaseInRepository_returnsNull() throws IOException {
         String fullRepoName = "user/test-repo";
         String toTag = "1.0";
-        GHTag tag1 = mock(GHTag.class);
-        GHTag tag2 = mock(GHTag.class);
-        GHTag tag3 = mock(GHTag.class);
 
-        when(tag1.getName()).thenReturn("1.0");
-        when(tag2.getName()).thenReturn("2.0");
-        when(tag3.getName()).thenReturn("3.0");
-
-        when(mockPagedIterable.toList()).thenReturn(List.of(tag3, tag2, tag1));
+        givenReleases(release("3.0", false), release("2.0", false), release("1.0", false));
 
         assertNull(gitHubTagService.getPreviousTag(fullRepoName, toTag));
     }

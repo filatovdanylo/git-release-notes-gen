@@ -3,17 +3,12 @@ package me.automatedgitdiffnotesgenerator.service;
 import me.automatedgitdiffnotesgenerator.client.GitHubClientFactory;
 import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
 import org.kohsuke.github.*;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.List;
 
 @Service
 public class GitHubTagService {
-
-    @Value("${github.api.token}")
-    private String githubToken;
 
     private final GitHubClientFactory clientFactory;
     public GitHubTagService(GitHubClientFactory clientFactory) {
@@ -24,24 +19,21 @@ public class GitHubTagService {
         GitHub github = clientFactory.create();
         GHRepository repository = github.getRepository(repoFullName);
 
-        List<GHTag> tags = repository.listTags().toList();
+        boolean foundCurrent = false;
+        for (var release : repository.listReleases()) {
+            if (foundCurrent && !release.isDraft()) {
+                return release.getTagName();
+            }
 
-        int index = -1;
-        for (int i = 0; i < tags.size(); i++) {
-            if (tags.get(i).getName().equals(toTag)) {
-                index = i;
-                break;
+            if (release.getTagName().equals(toTag)) {
+                foundCurrent = true;
             }
         }
 
-        if (index == -1) {
+        if (!foundCurrent) {
             throw new TagNotFoundException("Tag '" + toTag + "' not found in repository " + repoFullName);
         }
 
-        if (index + 1 >= tags.size()) {
-            return null;
-        }
-
-        return tags.get(index + 1).getName();
+        return null;
     }
 }

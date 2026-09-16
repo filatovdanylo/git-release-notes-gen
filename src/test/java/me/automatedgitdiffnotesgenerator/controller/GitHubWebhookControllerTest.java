@@ -1,10 +1,10 @@
 package me.automatedgitdiffnotesgenerator.controller;
 
-import me.automatedgitdiffnotesgenerator.exception.TagNotFoundException;
+import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
 import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
-import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -12,12 +12,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -27,17 +25,14 @@ class GitHubWebhookControllerTest {
     private static final String WEBHOOK_SECRET = "test-secret";
 
     private MockMvc mockMvc;
-    private GitHubTagService tagService;
     private ReleaseNoteJobProducer jobProducer;
 
     @BeforeEach
     void setUp() {
-        tagService = mock(GitHubTagService.class);
         jobProducer = mock(ReleaseNoteJobProducer.class);
 
         GitHubWebhookController controller = new GitHubWebhookController(
                 JsonMapper.builder().build(),
-                tagService,
                 jobProducer
         );
         ReflectionTestUtils.setField(controller, "webhookSecret", WEBHOOK_SECRET);
@@ -112,7 +107,7 @@ class GitHubWebhookControllerTest {
                         .content(payload))
                 .andExpect(status().isOk());
 
-        verifyNoInteractions(tagService, jobProducer);
+        verifyNoInteractions(jobProducer);
     }
 
     @Test
@@ -131,44 +126,44 @@ class GitHubWebhookControllerTest {
                         .content(payload))
                 .andExpect(status().isOk());
 
-        verifyNoInteractions(tagService, jobProducer);
+        verifyNoInteractions(jobProducer);
     }
 
     @Test
-    void gitHubApiUnreachableWhenResolvingTag_returns502() throws Exception {
-        String payload = publishedReleasePayload("octocat", "hello-world", "v2.0.0");
-        when(tagService.getPreviousTag(eq("octocat/hello-world"), eq("v2.0.0")))
-                .thenThrow(new IOException("connection reset"));
+    void missingRequiredFields_returns422() throws Exception {
+        String payload = """
+                {
+                  "action": "published",
+                  "repository": { "name": "", "owner": { "login": "octocat" } },
+                  "release": { "tag_name": "v2.0.0" }
+                }
+                """;
 
         mockMvc.perform(post("/api/webhooks/github")
                         .header("X-GitHub-Event", "release")
                         .header("X-Hub-Signature-256", sign(payload))
                         .content(payload))
-                .andExpect(status().isBadGateway());
+                .andExpect(status().isUnprocessableContent());
 
         verifyNoInteractions(jobProducer);
     }
 
     @Test
-    void tagNotFound_returns404() throws Exception {
-        String payload = publishedReleasePayload("octocat", "hello-world", "v2.0.0");
-        when(tagService.getPreviousTag(eq("octocat/hello-world"), eq("v2.0.0")))
-                .thenThrow(new TagNotFoundException("Tag 'v2.0.0' not found"));
+    void invalidJsonPayload_returns400() throws Exception {
+        String payload = "{ not-json";
 
         mockMvc.perform(post("/api/webhooks/github")
                         .header("X-GitHub-Event", "release")
                         .header("X-Hub-Signature-256", sign(payload))
                         .content(payload))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isBadRequest());
 
         verifyNoInteractions(jobProducer);
     }
 
     @Test
-    void validPublishedRelease_queuesJobAndReturns202() throws Exception {
+    void validPublishedRelease_queuesJobWithUnresolvedFromTagAndReturns202() throws Exception {
         String payload = publishedReleasePayload("octocat", "hello-world", "v2.0.0");
-        when(tagService.getPreviousTag(eq("octocat/hello-world"), eq("v2.0.0")))
-                .thenReturn("v1.0.0");
 
         mockMvc.perform(post("/api/webhooks/github")
                         .header("X-GitHub-Event", "release")
@@ -176,6 +171,10 @@ class GitHubWebhookControllerTest {
                         .content(payload))
                 .andExpect(status().isAccepted());
 
-        verify(jobProducer, times(1)).releaseNoteJob(any());
+        ArgumentCaptor<ReleaseNoteJob> jobCaptor = ArgumentCaptor.forClass(ReleaseNoteJob.class);
+        verify(jobProducer, times(1)).releaseNoteJob(jobCaptor.capture());
+
+        assertThat(jobCaptor.getValue())
+                .isEqualTo(new ReleaseNoteJob("octocat", "hello-world", null, "v2.0.0"));
     }
 }
