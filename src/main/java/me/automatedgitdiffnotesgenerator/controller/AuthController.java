@@ -1,5 +1,7 @@
 package me.automatedgitdiffnotesgenerator.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import me.automatedgitdiffnotesgenerator.dto.LoginRequest;
 import me.automatedgitdiffnotesgenerator.dto.RegisterRequest;
@@ -27,6 +29,10 @@ public class AuthController {
     }
 
     @PostMapping("/register")
+    @Operation(
+            summary = "Register endpoint is accessible only for users with ADMIN role",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
     public ResponseEntity<?> register(@RequestBody @Valid RegisterRequest registerRequest) {
         authService.register(registerRequest);
 

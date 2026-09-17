@@ -4,7 +4,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import lombok.extern.slf4j.Slf4j;
 import me.automatedgitdiffnotesgenerator.job.ReleaseNoteJob;
-import me.automatedgitdiffnotesgenerator.service.GitHubTagService;
 import me.automatedgitdiffnotesgenerator.producer.ReleaseNoteJobProducer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
