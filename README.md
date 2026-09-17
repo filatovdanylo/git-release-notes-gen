@@ -15,7 +15,7 @@ Instead of manually reviewing commits and writing release notes for every releas
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
 - [Architecture](#architecture)
-    - [1. Synchronous REST Workflow](#1-synchronous-rest-workflow)
+    - [1. Synchronous REST Workflow (dev only)](#1-synchronous-rest-workflow-dev-only)
     - [2. Asynchronous REST Workflow](#2-asynchronous-rest-workflow)
     - [3. Asynchronous GitHub Release Workflow](#3-asynchronous-github-release-workflow)
 - [Design Decisions](#design-decisions)
@@ -23,6 +23,8 @@ Instead of manually reviewing commits and writing release notes for every releas
 - [AI Integration](#ai-integration)
 - [Asynchronous Processing](#asynchronous-processing)
 - [Idempotency and Duplicate Job Protection](#idempotency-and-duplicate-job-protection)
+- [Authentication and Authorization](#authentication-and-authorization)
+- [Rate Limiting](#rate-limiting)
 - [Webhook Security](#webhook-security)
 - [Database](#database)
 - [REST API](#rest-api)
@@ -73,10 +75,10 @@ GitHub Webhook
 Verify HMAC-SHA256 signature
       │
       ▼
-Find previous tag
+RabbitMQ
       │
       ▼
-RabbitMQ
+Resolve previous release tag
       │
       ▼
 Fetch GitHub comparison
@@ -99,17 +101,23 @@ PostgreSQL
 ## Key features
 
 - **GitHub release integration** — reacts to published GitHub releases.
+- **Previous-release resolution** — finds the prior non-draft release via the GitHub Releases API (in the async consumer).
 - **Git tag comparison** — retrieves commits and changed files between two tags.
 - **AI-powered generation** — uses Spring AI with Ollama to generate release notes.
 - **Asynchronous processing** — RabbitMQ decouples webhook handling from the expensive generation workflow.
 - **Webhook security** — validates GitHub's `X-Hub-Signature-256` using HMAC-SHA256 and constant-time comparison.
-- **Idempotency** — prevents generating duplicate release notes for the same repository/tag range.
+- **JWT authentication** — protects the REST API with Bearer tokens (HS256).
+- **Ownership-based authorization** — users may generate or read notes only for repositories whose owner matches their username (`ADMIN` can access all).
+- **Admin-only registration** — new accounts can be created only by users with the `ADMIN` role.
+- **Rate limiting** — Bucket4j limits request rates per client IP on `/api/**` (auth endpoints excluded).
+- **Idempotency with reclaim** — prevents duplicate generation for the same repository/tag range, while allowing retries for `FAILED` or stale `PROCESSING` jobs.
 - **Persistent history** — stores generated notes and their processing status in PostgreSQL.
-- **Failure tracking** — failed asynchronous jobs are persisted with an error message.
-- **REST API** — supports manual synchronous and asynchronous generation.
+- **Failure tracking** — failed asynchronous jobs are persisted with a generic error message; details stay in server logs.
+- **REST API** — supports manual asynchronous generation; a synchronous path exists only under the `dev` profile.
 - **OpenAPI / Swagger** — API documentation is available during development.
 - **Database migrations** — PostgreSQL schema is managed with Flyway.
-- **Environment-specific configuration** — separate development and production configuration profiles.
+- **Environment-specific configuration** — separate development, test, and production configuration profiles.
+- **CI** — GitHub Actions runs the test suite on pushes and pull requests.
 
 ---
 
@@ -125,6 +133,8 @@ PostgreSQL
 | Persistence | Spring Data JPA / Hibernate         |
 | Migrations | Flyway                              |
 | Messaging | RabbitMQ / Spring AMQP              |
+| Security | Spring Security + OAuth2 Resource Server (JWT) |
+| Rate limiting | Bucket4j                            |
 | GitHub | GitHub REST API + Kohsuke GitHub API |
 | HTTP Client | Spring `RestClient`                 |
 | JSON | Jackson                             |
@@ -148,9 +158,11 @@ src/main/java/
     ├── dto/
     ├── entity/
     ├── exception/
+    ├── interceptor/
     ├── job/
     ├── producer/
     ├── repository/
+    ├── security/
     └── service/
 ```
     
@@ -158,18 +170,18 @@ src/main/java/
 
 ## Architecture
 
-The application has two main ways to generate release notes.
+The application has three ways to generate release notes.
 
-### 1. Synchronous REST workflow
+### 1. Synchronous REST workflow (dev only)
 
-Useful for manual requests and development:
+Useful for manual requests and debugging. Enabled only when the `dev` Spring profile is active:
 
 ```text
 Client
   │
-  │ POST /api/release-notes/generate
+  │ POST /api/release-notes/dev/generate
   ▼
-ReleaseNotesController
+SyncReleaseNotesController
   │
   ▼
 GitCompareService
@@ -194,30 +206,26 @@ HTTP response
 
 This endpoint returns the generated release notes directly and does not create a database record.
 
-This endpoint is intended for manual generation and development/debugging.
-Because GitHub API and LLM calls can be relatively slow, the asynchronous
-endpoint is preferred for production workflows.
+Because GitHub API and LLM calls can be relatively slow, the asynchronous endpoint is preferred for normal workflows.
 
 ### 2. Asynchronous REST workflow
 
-Can be used without GitHub webhook:
+Can be used without a GitHub webhook:
 
 ```text
-Client
+Client (JWT)
   │
   │ POST /api/release-notes/generate-async
   ▼
 ReleaseNotesController
-  │
-  │
+  │  ownership check (repoOwner == username or ADMIN)
   ▼
 RabbitMQ
   │
   ▼
 ReleaseNoteJobConsumer
   │
-  ├── Check for duplicate job
-  ├── Create PROCESSING record
+  ├── Claim / reclaim job in PostgreSQL
   ├── Fetch GitHub comparison
   ├── Generate notes with AI
   │
@@ -228,7 +236,7 @@ PostgreSQL
   └── FAILED + error message
 ```
 
-The controller immediately returns '202 Accepted' after job is placed onto RabbitMQ queue.
+The controller immediately returns `202 Accepted` after the job is placed onto the RabbitMQ queue.
 
 ### 3. Asynchronous GitHub release workflow
 
@@ -243,16 +251,16 @@ GitHubWebhookController
   │
   ├── Verify X-Hub-Signature-256
   ├── Validate event/action
-  ├── Find previous tag
+  ├── Enqueue job (fromTag unresolved)
   │
-  ▼
+  ▼  202 Accepted
 RabbitMQ
   │
   ▼
 ReleaseNoteJobConsumer
   │
-  ├── Check for duplicate job
-  ├── Create PROCESSING record
+  ├── Resolve previous release tag
+  ├── Claim / reclaim job in PostgreSQL
   ├── Fetch GitHub comparison
   ├── Generate notes with AI
   │
@@ -263,7 +271,7 @@ PostgreSQL
   └── FAILED + error message
 ```
 
-The webhook controller does not wait for a release note to generate. Instead, it places a job onto RabbitMQ queue and immediately returns '202 Accepted'. The release note appears in database as generation finishes.
+The webhook controller does not call the GitHub API and does not wait for notes to be generated. It validates the event, publishes a job with `fromTag = null`, and returns `202 Accepted`. The consumer resolves the previous release, then runs generation.
 
 ---
 
@@ -276,6 +284,13 @@ API requests can take significantly longer, so the webhook handler only
 validates the event and publishes a job.
 
 This prevents external API latency from blocking the webhook request.
+
+### Why resolve the previous release in the consumer?
+
+Listing releases and calling GitHub from the webhook handler risks GitHub's
+webhook timeout and couples acknowledgment to upstream availability.
+Deferring resolution keeps the HTTP path fast and lets RabbitMQ retries
+handle transient GitHub failures.
 
 ### Why PostgreSQL?
 
@@ -301,10 +316,19 @@ Large raw diffs can unnecessarily increase the model context size.
 The application therefore sends commit messages and changed-file
 metadata instead.
 
-### Why check if job is already claimed before processing?
-Although safety layer on the database side guarantees that no duplicates
-can be inserted, the check exists to not waste resources on expensive 
-GitHub API calls and LLM note processing.
+### Why reclaim FAILED or stale PROCESSING jobs?
+
+A hard "insert once forever" claim would leave permanent dead jobs after
+transient GitHub or LLM failures. The claim query can re-take a row when
+status is `FAILED`, or when `PROCESSING` is older than a configured
+stale threshold (`app.release-notes.claim-stale-after`).
+
+### Why check if a job is already claimed before processing?
+
+Although the database uniqueness constraint guarantees no duplicate rows
+for the same tag range, the claim step avoids wasting resources on
+expensive GitHub API calls and LLM processing when another worker already
+owns the job.
 
 ---
 
@@ -321,6 +345,10 @@ For example:
 ```text
 v1.0.0...v1.1.0
 ```
+
+For webhook-driven jobs, the previous tag is resolved from the **Releases**
+API (newest to older, skipping drafts), not by loading every repository tag
+into memory.
 
 The comparison data is transformed into a compact context for the AI model.
 
@@ -347,6 +375,8 @@ Changed files:
 
 This keeps the AI input smaller while still providing useful information about the release.
 
+GitHub API access currently uses a **Personal Access Token** (`GITHUB_PAT_TOKEN`).
+
 ---
 
 ## AI Integration
@@ -364,7 +394,8 @@ The system prompt defines four possible sections:
 ## Other Changes
 ```
 
-The prompt also explicitly instructs the model **not to invent information that is not supported by the commits or changed files**.
+The prompt also explicitly instructs the model **not to invent information
+that isn't implied by the commits or file changes provided**.
 
 ### Local AI with Ollama
 
@@ -406,22 +437,27 @@ A job contains:
 }
 ```
 
+For webhook-originated jobs, `fromTag` is `null` until the consumer resolves it.
+
 The producer publishes this job to:
 
 ```text
 release-note-generation-queue
 ```
 
+Listener retries for transient failures are configured in Spring AMQP
+(exponential backoff, limited attempts).
+
 The consumer then performs the expensive work:
 
-1. Check whether the release notes already exist.
-2. Create a `PROCESSING` database record.
+1. Resolve `fromTag` when missing (previous non-draft release).
+2. Atomically claim (or reclaim) a `PROCESSING` database record.
 3. Fetch the GitHub comparison.
 4. Generate release notes using the LLM.
 5. Save the generated content.
 6. Mark the record as `COMPLETED`.
 
-If an exception occurs:
+If an exception occurs after the claim:
 
 ```text
 PROCESSING
@@ -431,7 +467,7 @@ PROCESSING
       FAILED
 ```
 
-All error messages are logged.
+Full error details are logged; only a generic message is stored on the row.
 
 ---
 
@@ -447,13 +483,68 @@ The release is uniquely identified by:
 
 repo_owner + repo_name + from_tag + to_tag
 
-PostgreSQL enforces this uniqueness with a unique constraint, while the
-job claim uses `INSERT ... ON CONFLICT DO NOTHING`.
+PostgreSQL enforces this uniqueness with a unique constraint. The claim uses:
 
-Only the consumer that successfully inserts the `PROCESSING` record
-continues with GitHub and AI processing.
+```text
+INSERT ... ON CONFLICT DO UPDATE
+```
+
+with a guarded `WHERE` so that only `FAILED` rows, or `PROCESSING` rows older
+than `app.release-notes.claim-stale-after`, can be reclaimed. `COMPLETED`
+jobs and fresh `PROCESSING` jobs are left alone.
+
+Only the consumer that successfully inserts or updates the row continues
+with GitHub and AI processing.
 
 Duplicate messages are acknowledged without triggering another generation.
+
+---
+
+## Authentication and Authorization
+
+The REST API (except login, Swagger in dev, and the GitHub webhook) requires a JWT Bearer token.
+
+### Login
+
+```http
+POST /api/auth/login
+```
+
+Returns an access token, token type `Bearer`, and TTL in milliseconds.
+
+### Register
+
+```http
+POST /api/auth/register
+```
+
+Requires an authenticated user with the `ADMIN` role. Creates a new user with role `USER`.
+
+The first administrator must be inserted into the `users` table manually (or through a one-off DB seed), because open self-registration is disabled.
+
+### Ownership model
+
+For release-note endpoints:
+
+- A normal user may act only when `repoOwner` / `{owner}` equals their username.
+- Users with role `ADMIN` may access any repository.
+
+This is a demo-style ownership check. Stronger binding (for example a GitHub App installation) is listed under Future Improvements.
+
+Passwords are stored with BCrypt. JWTs are signed with HS256 using a Base64-encoded secret of at least 32 raw bytes.
+
+---
+
+## Rate Limiting
+
+Bucket4j applies per-client-IP limits on `/api/**`, excluding `/api/auth/**`:
+
+| Endpoint pattern | Limit |
+|---|---|
+| Paths containing `/generate` | 3 requests per minute |
+| Other matched API paths | 10 requests per minute |
+
+Exceeded limits return `429 Too Many Requests`.
 
 ---
 
@@ -477,15 +568,15 @@ Only verified `release` events with the `published` action are processed.
 
 The webhook secret is provided through an environment variable rather than being stored in source code.
 
+Local development without a public URL can use a tunnel (ngrok, Cloudflare Tunnel, Smee, and similar) pointed at `/api/webhooks/github`, or signed fake webhook requests against localhost.
+
 ---
 
 ## Database
 
-PostgreSQL stores the generated release notes.
+PostgreSQL stores generated release notes and application users.
 
 ### `release_notes`
-
-The entity contains:
 
 ```text
 id
@@ -508,6 +599,18 @@ COMPLETED
 FAILED
 ```
 
+### `users`
+
+```text
+id
+username
+password
+role
+enabled
+created_at
+updated_at
+```
+
 Flyway manages the database schema.
 
 The initial migration also creates:
@@ -517,16 +620,62 @@ The initial migration also creates:
 - a creation-time index
 - an `updated_at` trigger
 
-The schema also contains a `webhook_events` table prepared for webhook event persistence and processing tracking.
+The schema also contains a `webhook_events` table prepared for webhook event persistence and delivery-ID tracking (not yet used by the application code).
 
 ---
 
 ## REST API
 
-### Generate release notes synchronously
+Protected endpoints expect:
 
 ```http
-POST /api/release-notes/generate
+Authorization: Bearer <jwt>
+```
+
+### Login
+
+```http
+POST /api/auth/login
+```
+
+Request:
+
+```json
+{
+  "username": "octocat",
+  "password": "password1"
+}
+```
+
+---
+
+### Register (ADMIN only)
+
+```http
+POST /api/auth/register
+```
+
+Request:
+
+```json
+{
+  "username": "new-user",
+  "password": "password1"
+}
+```
+
+HTTP status:
+
+```text
+201 Created
+```
+
+---
+
+### Generate release notes synchronously (dev profile only)
+
+```http
+POST /api/release-notes/dev/generate
 ```
 
 Request:
@@ -540,7 +689,7 @@ Request:
 }
 ```
 
-Returns the generated Markdown directly.
+Returns the generated Markdown directly. Not available outside the `dev` profile.
 
 ---
 
@@ -549,6 +698,8 @@ Returns the generated Markdown directly.
 ```http
 POST /api/release-notes/generate-async
 ```
+
+Requires ownership: `repoOwner` must equal the authenticated username, or the caller must be `ADMIN`.
 
 Request:
 
@@ -581,6 +732,8 @@ HTTP status:
 GET /api/release-notes/{owner}/{repo}
 ```
 
+Requires ownership: `{owner}` must equal the authenticated username, or the caller must be `ADMIN`.
+
 Returns stored release notes for a repository.
 
 ---
@@ -603,7 +756,7 @@ Supported *action*:
 published
 ```
 
-The webhook automatically determines the previous tag and queues the corresponding generation job.
+The webhook queues a job with an unresolved `fromTag`. The consumer determines the previous release and runs generation.
 
 ---
 
@@ -615,9 +768,10 @@ The project uses Spring profiles:
 application.yaml
 application-dev.yaml
 application-prod.yaml
+application-test.yaml
 ```
 
-Common configuration contains:
+Common configuration includes:
 
 ```yaml
 github:
@@ -625,21 +779,32 @@ github:
     token: ${GITHUB_PAT_TOKEN}
   webhook:
     secret: ${WEBHOOK_SECRET}
+
+app:
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: git-diff-notes-generator
+    access-token-ttl: 1h
+  release-notes:
+    claim-stale-after: 15m
 ```
 
 Development configuration contains the local PostgreSQL and Ollama settings.
 
-Production configuration expects database connection details to be provided through environment variables.
+Production configuration expects database connection details through environment variables and disables Swagger / OpenAPI docs.
 
 ### Required environment variables
 
-At minimum:
+At minimum (local `dev`):
 
 ```text
 GITHUB_PAT_TOKEN
 WEBHOOK_SECRET
 DATABASE_DEV_PASSWORD
+JWT_SECRET
 ```
+
+`JWT_SECRET` must be Base64-encoded and decode to at least 32 bytes.
 
 For production:
 
@@ -647,11 +812,16 @@ For production:
 DATABASE_URL
 DATABASE_USERNAME
 DATABASE_PASSWORD
+GITHUB_PAT_TOKEN
+WEBHOOK_SECRET
+JWT_SECRET
 ```
+
+Docker Compose starts PostgreSQL on host port `5433` and RabbitMQ (AMQP `5672`, management UI `15672`).
 
 ---
 
-## Running locally
+## Running Locally
 
 ### Prerequisites
 
@@ -660,8 +830,8 @@ Make sure you have:
 - Java 25+
 - Docker
 - Docker Compose
-- Ollama
-- GitHub Personal Access Token
+- Ollama (`qwen3:8b` pulled/running)
+- GitHub Personal Access Token with access to the repositories you want to process
 
 ### 1. Clone the repository
 
@@ -675,11 +845,22 @@ git clone https://github.com/filatovdanylo/git-release-notes-gen.git
 GITHUB_PAT_TOKEN=your_token
 WEBHOOK_SECRET=your_secret
 DATABASE_DEV_PASSWORD=your_db_password
+JWT_SECRET=your_base64_secret_at_least_32_bytes_when_decoded
 ```
 
-### 3. Make sure Ollama model is running
+### 3. Start infrastructure
 
-### 4. Start the application
+```bash
+docker compose up -d
+```
+
+### 4. Make sure the Ollama model is running
+
+### 5. Bootstrap an admin user
+
+Insert an admin row into `users` (BCrypt password hash), then use `/api/auth/login`. Additional users can be created via `/api/auth/register` with that admin token.
+
+### 6. Start the application
 
 Using the Gradle wrapper:
 
@@ -693,13 +874,15 @@ On Windows:
 .\gradlew.bat bootRun --args="--spring.profiles.active=dev"
 ```
 
-### 5. Explore the API
+### 7. Explore the API
 
 Once the application is running, interactive API documentation is available at:
 
 ```text
 http://localhost:8080/swagger-ui.html
 ```
+
+Authorize in Swagger with a Bearer JWT obtained from `/api/auth/login`.
 
 ---
 
@@ -718,16 +901,17 @@ with different testing strategies chosen per layer:
 ### What's covered
 
 - **Webhook signature verification** — valid, missing, malformed, and
-  cryptographically invalid signatures.
-- **GitHub API failure modes** — non-2xx responses mapped to the correct
+  cryptographically invalid signatures; enqueue with unresolved `fromTag`.
+- **GitHub Releases previous-tag resolution** — previous release, drafts skipped,
+  missing tag, single release, oldest release.
+- **Consumer resolve path** — webhook jobs resolve `fromTag` before claim;
+  first-release and not-found cases skip generation; GitHub IO failures are rethrown for retry.
+- **GitHub Compare API failure modes** — non-2xx responses mapped to the correct
   status, network/transport failures wrapped without leaking internals.
 - **Idempotent job claiming** — duplicate jobs are skipped without
   re-triggering GitHub or AI calls.
 - **Error handling boundaries** — internal exception messages are logged
-  in full but never persisted or exposed through the API; only a generic,
-  safe message is stored on `FAILED` records.
-- **Tag resolution edge cases** — target tag not found, target tag is the
-  newest (nothing to diff against), single-tag repositories.
+  in full but never persisted on `FAILED` records; only a generic safe message is stored.
 
 ### Running tests
 
@@ -743,18 +927,19 @@ Possible next steps include:
 
 **Security & Reliability**
 - GitHub App authentication instead of a personal access token
-- Persisting and deduplicating GitHub webhook delivery IDs
-- RabbitMQ retry and dead-letter queues
-- Authentication/authorization for the REST API
+- Stronger tenancy than username == repository owner (installation-scoped access)
+- Persisting and deduplicating GitHub webhook delivery IDs (`webhook_events`)
+- RabbitMQ dead-letter queues
+- First-admin bootstrap without manual SQL
 
 **AI & Content Quality**
 - AI structured output instead of plain Markdown
 - Support for pull-request metadata and labels
 - Large-diff/token-limit handling
-- Release-note regeneration
+- Release-note regeneration endpoint
 
 **API & Operations**
 - Job status endpoint
 - Metrics and observability with Spring Boot Actuator
-- Docker image and CI/CD pipeline
+- Docker image for the application itself
 - Deployment to a cloud environment
