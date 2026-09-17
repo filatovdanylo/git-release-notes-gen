@@ -3,11 +3,13 @@ package me.automatedgitdiffnotesgenerator.config;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.net.http.HttpClient;
 
 @Configuration
+@EnableMethodSecurity
 public class AppConfig {
 
     private static final String SYSTEM_PROMPT = """
