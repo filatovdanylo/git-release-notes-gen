@@ -34,6 +34,7 @@ public class SyncReleaseNotesController {
     public ResponseEntity<?> generateNotes(@RequestBody @Valid GenerateNoteRequest request) {
         var context = compareService.getCommitDiff(request);
 
-        return ResponseEntity.ok(generationService.generate(context));
+        return ResponseEntity.ok(context);
+//        return ResponseEntity.ok(generationService.generate(context));
     }
 }
