@@ -7,9 +7,11 @@ import me.automatedgitdiffnotesgenerator.repository.ReleaseNoteRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.swing.text.html.Option;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ReleaseNotesService {
@@ -33,6 +35,26 @@ public class ReleaseNotesService {
                         r.getContent(),
                         r.getCreatedAt()
                 )).toList();
+    }
+
+    public Optional<NoteResponse> getNoteByRepoAndTags(String owner, String repo, String from, String to) {
+        var note = repository.findByRepoOwnerAndRepoNameAndFromTagAndToTag(owner, repo, from, to);
+
+        if (note.isEmpty()) {
+            return Optional.empty();
+        }
+
+        var databaseNote = note.get();
+
+        return Optional.of(new NoteResponse(
+                databaseNote.getRepoOwner(),
+                databaseNote.getRepoName(),
+                databaseNote.getFromTag(),
+                databaseNote.getToTag(),
+                databaseNote.getStatus(),
+                databaseNote.getContent(),
+                databaseNote.getCreatedAt()
+        ));
     }
 
     @Transactional

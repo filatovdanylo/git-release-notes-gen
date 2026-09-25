@@ -56,4 +56,43 @@ public class ReleaseNotesController {
         return ResponseEntity.ok(notes);
     }
 
+    @GetMapping("/{owner}/{repo}/{from}/{to}")
+    @Operation(
+            summary = "Get release note for given {owner}/{repo} repository with {from} and {to} tags",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @PreAuthorize("#owner == authentication.name or hasRole('ADMIN')")
+    public ResponseEntity<?> getNoteByRepoAndTags(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable String from,
+            @PathVariable String to
+    ) {
+        var note = notesService.getNoteByRepoAndTags(owner, repo, from, to);
+
+        if (note.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok(note.get());
+    }
+
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @PostMapping("/{owner}/{repo}/{from}/{to}/regenerate")
+    @Operation(
+            summary = "Force note regeneration. Only available if status is PROCESSING or FAILED",
+            security = @SecurityRequirement(name = "bearerAuth")
+    )
+    @PreAuthorize("#owner == authentication.name or hasRole('ADMIN')")
+    public ResponseEntity<?> forceRegenerateNoteAsync(
+            @PathVariable String owner,
+            @PathVariable String repo,
+            @PathVariable String from,
+            @PathVariable String to
+    ) {
+        // TODO
+
+        return ResponseEntity.accepted().build();
+    }
+
 }
