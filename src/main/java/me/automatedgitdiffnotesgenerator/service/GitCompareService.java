@@ -70,7 +70,7 @@ public class GitCompareService {
                             request.repoOwner(), request.repoName(), request.fromTag(), request.toTag())
                     .header("Authorization", "Bearer " + token)
                     .retrieve()
-                    .onStatus(status -> !status.equals(HttpStatus.OK), (req, res) -> {
+                    .onStatus(status -> !status.is2xxSuccessful(), (req, res) -> {
                         throwGitApiException(res.getStatusCode().value(), res.getBody().readAllBytes());
                     })
                     .body(String.class);
@@ -146,7 +146,7 @@ public class GitCompareService {
                         request.repoOwner(), request.repoName(), request.fromTag())
                 .header("Authorization", "Bearer " + token)
                 .retrieve()
-                .onStatus(status -> !status.equals(HttpStatus.OK), (req, res) -> {
+                .onStatus(status -> !status.is2xxSuccessful(), (req, res) -> {
                     throwGitApiException(res.getStatusCode().value(), res.getBody().readAllBytes());
                 })
                 .body(JsonNode.class);
@@ -156,7 +156,7 @@ public class GitCompareService {
                         request.repoOwner(), request.repoName(), request.toTag())
                 .header("Authorization", "Bearer " + token)
                 .retrieve()
-                .onStatus(status -> !status.equals(HttpStatus.OK), (req, res) -> {
+                .onStatus(status -> !status.is2xxSuccessful(), (req, res) -> {
                     throwGitApiException(res.getStatusCode().value(), res.getBody().readAllBytes());
                 })
                 .body(JsonNode.class);
@@ -204,7 +204,7 @@ public class GitCompareService {
                             .build())
                     .header("Authorization", "Bearer " + token)
                     .retrieve()
-                    .onStatus(status -> !status.equals(HttpStatus.OK), (req, res) -> {
+                    .onStatus(status -> !status.is2xxSuccessful(), (req, res) -> {
                         throwGitApiException(res.getStatusCode().value(), res.getBody().readAllBytes());
                     })
                     .body(JsonNode.class);

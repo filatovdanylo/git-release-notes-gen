@@ -10,6 +10,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.client.RestClientException;
 
 import java.net.URI;
 import java.time.Instant;
@@ -26,10 +27,13 @@ public class GlobalExceptionHandler {
 
         ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
         problemDetail.setTitle("GitHub API Error");
-        problemDetail.setType(URI.create("https://api.github.com/errors/git-api-error"));
         problemDetail.setProperty("timestamp", Instant.now());
 
-        log.error("GitHub API error occurred: {}", ex.getMessage(), ex);
+        if (status.is5xxServerError()) {
+            log.error("GitHub API error occurred: {}", ex.getMessage(), ex);
+        } else {
+            log.warn("GitHub API error occurred: {}", ex.getMessage());
+        }
 
         return problemDetail;
     }
@@ -141,6 +145,21 @@ public class GlobalExceptionHandler {
         problemDetail.setProperty("timestamp", Instant.now());
 
         log.warn("Data Integrity Violation: {}", ex.getMessage());
+
+        return problemDetail;
+    }
+
+    @ExceptionHandler(RestClientException.class)
+    public ProblemDetail handleRestClientException(RestClientException ex) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY,
+                "Unexpected error. Cannot connect to GitHub servers"
+        );
+
+        problemDetail.setTitle("Rest Client Error");
+        problemDetail.setProperty("timestamp", Instant.now());
+
+        log.warn("Rest Client Error: {}", ex.getMessage());
 
         return problemDetail;
     }
