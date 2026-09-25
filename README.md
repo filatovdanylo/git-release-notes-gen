@@ -84,7 +84,7 @@ Resolve previous release tag
 Fetch GitHub comparison
       │
       ▼
-Extract commits + changed files
+Extract commits, pull requests + changed files
       │
       ▼
 Spring AI / Ollama
@@ -103,6 +103,8 @@ PostgreSQL
 - **GitHub release integration** — reacts to published GitHub releases.
 - **Previous-release resolution** — finds the prior non-draft release via the GitHub Releases API (in the async consumer).
 - **Git tag comparison** — retrieves commits and changed files between two tags.
+- **Pull request enrichment** — extracts PR references from commit messages and, for smaller releases, resolves PR titles via the GitHub Search API without per-commit API calls.
+- **Adaptive LLM context** — builds a richer context for small releases and a compact summary for large ones (commit-count threshold).
 - **AI-powered generation** — uses Spring AI with Ollama to generate release notes.
 - **Asynchronous processing** — RabbitMQ decouples webhook handling from the expensive generation workflow.
 - **Webhook security** — validates GitHub's `X-Hub-Signature-256` using HMAC-SHA256 and constant-time comparison.
@@ -186,10 +188,7 @@ SyncReleaseNotesController
   ▼
 GitCompareService
   │
-  │ GitHub Compare API
-  ▼
-Git changes
-  │
+  │ Compare + PR-aware context
   ▼
 NoteGenerationService
   │
@@ -313,8 +312,25 @@ integrating naturally with the Spring Boot application.
 ### Why send a compact change summary instead of the raw diff?
 
 Large raw diffs can unnecessarily increase the model context size.
-The application therefore sends commit messages and changed-file
-metadata instead.
+The application therefore sends commit messages, pull-request references,
+and changed-file metadata instead.
+
+### Why enrich context with pull requests?
+
+Commit subjects often already contain `#123` or `Merge pull request #123`.
+Parsing those references avoids expensive per-commit GitHub calls. For
+smaller releases, PR numbers found in commits are matched against a single
+(paginated) Search query for merged PRs in the release date window, so the
+model receives PR titles without an N+1 API pattern.
+
+### Why different context for small and large releases?
+
+Releases with many commits can drown the model in noise (merge commits,
+dependency bots, tiny file churn). When the compare result exceeds a
+commit-count threshold (currently 50), the application keeps non-PR
+commits and parsed PR references, but summarizes file changes as total
+additions/deletions instead of listing every file. Smaller releases keep
+per-file detail and Search-enriched PR titles.
 
 ### Why reclaim FAILED or stale PROCESSING jobs?
 
@@ -329,6 +345,16 @@ Although the database uniqueness constraint guarantees no duplicate rows
 for the same tag range, the claim step avoids wasting resources on
 expensive GitHub API calls and LLM processing when another worker already
 owns the job.
+
+### Why a Personal Access Token instead of a GitHub App?
+
+A GitHub App would add installation tokens, PEM secrets, and heavier local
+setup (tunnels for webhooks during development). This project is aimed at
+personal / local use and portfolio demonstration of the Spring stack, not
+multi-tenant SaaS. A PAT (ideally fine-grained and repo-scoped) keeps
+configuration to one environment variable and makes the project easy to
+run. GitHub App authentication remains a future option if the product
+direction becomes a shared public service.
 
 ---
 
@@ -354,28 +380,30 @@ The comparison data is transformed into a compact context for the AI model.
 
 Instead of sending a potentially huge raw diff, the current implementation extracts:
 
-- commit messages
+- commit messages (commits that do not already look like PR references)
 - shortened commit SHAs
-- changed file names
-- file change status
-- additions
-- deletions
+- pull request numbers parsed from commit subjects (`#123`)
+- for smaller releases: PR titles from the GitHub Search API (merged PRs in the release date window, intersected with numbers found in commits)
+- changed file names, status, additions, and deletions (or aggregate line counts for large releases)
 
-Example context:
+Example context (small release):
 
 ```text
 Commits:
 - Add authentication endpoint (a1b2c3d)
 - Fix password validation (e4f5g6h)
 
+Pull requests:
+- (#42) Add caching layer
+
 Changed files:
 - [added] src/main/java/.../AuthController.java (+85 / -0)
 - [modified] src/main/java/.../UserService.java (+24 / -7)
 ```
 
-This keeps the AI input smaller while still providing useful information about the release.
+This keeps the AI input smaller while still providing useful information about the release, without calling `/commits/{sha}/pulls` for every commit.
 
-GitHub API access currently uses a **Personal Access Token** (`GITHUB_PAT_TOKEN`).
+GitHub API access uses a **Personal Access Token** (`GITHUB_PAT_TOKEN`).
 
 ---
 
@@ -383,7 +411,8 @@ GitHub API access currently uses a **Personal Access Token** (`GITHUB_PAT_TOKEN`
 
 The project uses **Spring AI's `ChatClient`** to abstract interaction with the language model.
 
-The AI receives the Git change context and is instructed to produce structured Markdown.
+The AI receives the Git change context (commits, pull requests, and file
+changes) and is instructed to produce structured Markdown.
 
 The system prompt defines four possible sections:
 
@@ -395,7 +424,7 @@ The system prompt defines four possible sections:
 ```
 
 The prompt also explicitly instructs the model **not to invent information
-that isn't implied by the commits or file changes provided**.
+that isn't implied by the commits, pull requests, or file changes provided**.
 
 ### Local AI with Ollama
 
@@ -452,7 +481,7 @@ The consumer then performs the expensive work:
 
 1. Resolve `fromTag` when missing (previous non-draft release).
 2. Atomically claim (or reclaim) a `PROCESSING` database record.
-3. Fetch the GitHub comparison.
+3. Fetch the GitHub comparison and build an adaptive LLM context (commits, PRs, files).
 4. Generate release notes using the LLM.
 5. Save the generated content.
 6. Mark the record as `COMPLETED`.
@@ -831,7 +860,7 @@ Make sure you have:
 - Docker
 - Docker Compose
 - Ollama (`qwen3:8b` pulled/running)
-- GitHub Personal Access Token with access to the repositories you want to process
+- GitHub Personal Access Token with access to the repositories you want to process (a fine-grained, repo-scoped token is recommended)
 
 ### 1. Clone the repository
 
@@ -908,6 +937,8 @@ with different testing strategies chosen per layer:
   first-release and not-found cases skip generation; GitHub IO failures are rethrown for retry.
 - **GitHub Compare API failure modes** — non-2xx responses mapped to the correct
   status, network/transport failures wrapped without leaking internals.
+- **Pull-request context path** — small releases call Releases + Search with
+  auth headers; PR titles are intersected with `#N` references from commits.
 - **Idempotent job claiming** — duplicate jobs are skipped without
   re-triggering GitHub or AI calls.
 - **Error handling boundaries** — internal exception messages are logged
@@ -926,20 +957,21 @@ with different testing strategies chosen per layer:
 Possible next steps include:
 
 **Security & Reliability**
-- GitHub App authentication instead of a personal access token
-- Stronger tenancy than username == repository owner (installation-scoped access)
 - Persisting and deduplicating GitHub webhook delivery IDs (`webhook_events`)
 - RabbitMQ dead-letter queues
 - First-admin bootstrap without manual SQL
+- Stronger tenancy than username == repository owner (for example a repo allowlist, or a GitHub App if the project becomes multi-tenant SaaS)
+- Sanitizing upstream GitHub error bodies before returning them to API clients
 
 **AI & Content Quality**
 - AI structured output instead of plain Markdown
-- Support for pull-request metadata and labels
-- Large-diff/token-limit handling
+- PR labels and further noise filtering (bots / merge commits) in large releases
+- Explicit LLM token-budget / truncation handling when Compare results are capped
+- Fallback when `/releases/tags/{tag}` is missing (tag without a GitHub Release)
 - Release-note regeneration endpoint
 
 **API & Operations**
 - Job status endpoint
 - Metrics and observability with Spring Boot Actuator
 - Docker image for the application itself
-- Deployment to a cloud environment
+- Deployment to a cloud environment (only if the project moves beyond local / portfolio use)
